@@ -14,22 +14,14 @@ class MarkedToMeGeneral extends StatefulWidget {
 
 class _MarkedToMeGeneralState extends State<MarkedToMeGeneral> {
   // Data variables
-  List<dynamic> allInspectionData = []; // Store all data
-  List<dynamic> filteredInspectionData = []; // Store filtered data
-  // bool isLoading = false;
-  // int? userId; // You can get this from shared preferences or pass it down
+  List<dynamic> allInspectionData = [];
+  List<dynamic> filteredInspectionData = [];
   bool isLoading = true;
-  int? userId; // Dynamic user ID - will be set in initState
+  int? userId;
+  Map<String, int> statusCounts = {};
 
-  // Status mapping - using status_flag values from your API
-  static const List<int> statusFlags = [
-    0, // Index 0 - draft
-    1, // Index 1 - pending
-    2, // Index 2 - partially_completed
-    3, // Index 3 - complied
-    4, // Index 4 - rejected
-  ];
-
+  // Status mapping
+  static const List<int> statusFlags = [0, 1, 2, 3, 4];
   static const List<String> statusLabels = [
     'draft',
     'pending', 
@@ -39,63 +31,104 @@ class _MarkedToMeGeneralState extends State<MarkedToMeGeneral> {
   ];
 
   @override
-  
-// void initState() {
-//   super.initState();
-//   _loadUserIdAndFetch();
-// }
-@override
-void initState() {
-  super.initState();
-  _loadUserIdAndFetch();
-}
-
-Future<void> _loadUserIdAndFetch() async {
-  final prefs = await SharedPreferences.getInstance();
-  setState(() {
-    userId = prefs.getInt('user_id');
-  });
-  
-  print('📋 MarkedToMe - Retrieved user_id: $userId');
-  
-  if (userId != null) {
-    fetchMarkedToMeInspections();
-  } else {
-    showSnackBar('User ID not found. Please login again.');
-    setState(() {
-      isLoading = false;
-    });
+  void initState() {
+    super.initState();
+    _loadUserIdAndFetch();
   }
-}
 
+  // 🔥 ADD THIS METHOD - It detects when statusIndex changes
+  @override
+  void didUpdateWidget(MarkedToMeGeneral oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    
+    // If statusIndex changed, fetch new data
+    if (oldWidget.statusIndex != widget.statusIndex) {
+      print('🔄 Status index changed from ${oldWidget.statusIndex} to ${widget.statusIndex}');
+      fetchMarkedToMeInspections();
+    }
+  }
+
+  Future<void> _loadUserIdAndFetch() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      userId = prefs.getInt('user_id');
+    });
+    
+    print('📋 MarkedToMe - Retrieved user_id: $userId');
+    
+    if (userId != null) {
+      fetchMarkedToMeInspections();
+    } else {
+      showSnackBar('User ID not found. Please login again.');
+      setState(() {
+        isLoading = false;
+      });
+    }
+  }
 
   Future<void> fetchMarkedToMeInspections() async {
+    if (userId == null) {
+      print('⚠️ userId is null, cannot fetch');
+      return;
+    }
+
     setState(() {
       isLoading = true;
     });
 
     try {
+      // Build URL with status_flag parameter if specific status is selected
+      String url = 'http://localhost:8000/api/marked-to-me/?user_id=$userId';
+      
+      // Add status_flag filter if a specific status is selected (not "All")
+      if (widget.statusIndex >= 0 && widget.statusIndex < statusFlags.length) {
+        final statusFlag = statusFlags[widget.statusIndex];
+        url += '&status_flag=$statusFlag';
+        print('🔍 Fetching with status_flag: $statusFlag');
+      } else {
+        print('🔍 Fetching all statuses');
+      }
+
+      print('🌐 API URL: $url');
+
       final response = await http.get(
-        Uri.parse('http://localhost:8000/api/marked-to-me/?user_id=$userId'),
+        Uri.parse(url),
         headers: {
           'Content-Type': 'application/json',
         },
       );
 
+      print('📡 Response Status Code: ${response.statusCode}');
+
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
+        
         if (responseData['success']) {
           setState(() {
-            allInspectionData = responseData['inspections'] ?? [];
-            _filterDataByStatus(); // Filter based on current status index
+            // Store filtered data from API
+            filteredInspectionData = responseData['inspections'] ?? [];
+            
+            // Store status counts if available
+            if (responseData.containsKey('status_counts')) {
+              statusCounts = Map<String, int>.from(responseData['status_counts']);
+            }
+            
+            // If showing all, store in allInspectionData too
+            if (widget.statusIndex < 0 || widget.statusIndex >= statusFlags.length) {
+              allInspectionData = filteredInspectionData;
+            }
           });
+          
+          print('✅ Loaded ${filteredInspectionData.length} inspections');
+          print('📊 Status Counts: $statusCounts');
         } else {
-          showSnackBar('Error: Failed to load data');
+          showSnackBar('Error: ${responseData['message'] ?? 'Failed to load data'}');
         }
       } else {
         showSnackBar('Failed to load data. Status code: ${response.statusCode}');
       }
     } catch (e) {
+      print('❌ Error: $e');
       showSnackBar('Network error: $e');
     } finally {
       setState(() {
@@ -104,43 +137,17 @@ Future<void> _loadUserIdAndFetch() async {
     }
   }
 
-  void _filterDataByStatus() {
-    if (allInspectionData.isEmpty) {
-      setState(() {
-        filteredInspectionData = [];
-      });
-      return;
-    }
-
-    // If statusIndex is -1 or not set, show all data (when "Marked To Me" is clicked)
-    if (widget.statusIndex < 0 || widget.statusIndex >= statusFlags.length) {
-      setState(() {
-        filteredInspectionData = allInspectionData;
-      });
-      return;
-    }
-
-    int targetStatusFlag = statusFlags[widget.statusIndex];
-
-    setState(() {
-      filteredInspectionData = allInspectionData.where((inspection) {
-        final statusFlag = inspection['status_flag'];
-        return statusFlag == targetStatusFlag;
-      }).toList();
-    });
-
-    print('Filtered data for status flag: $targetStatusFlag, Count: ${filteredInspectionData.length}');
-  }
-
   void showSnackBar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
   }
 
   String _getStatusDisplayName(int statusIndex) {
     if (statusIndex < 0 || statusIndex >= statusLabels.length) {
-      return 'All'; // Show "All" when no specific status is selected
+      return 'All';
     }
 
     const displayNames = [
@@ -156,15 +163,15 @@ Future<void> _loadUserIdAndFetch() async {
   Color _getStatusColor(int? statusFlag) {
     switch (statusFlag) {
       case 0:
-        return Colors.grey[600]!; // Draft
+        return Colors.grey[600]!;
       case 1:
-        return Colors.orange[600]!; // Pending
+        return Colors.orange[600]!;
       case 2:
-        return Colors.amber[600]!; // Partially Completed
+        return Colors.amber[600]!;
       case 3:
-        return Colors.green[600]!; // Complied
+        return Colors.green[600]!;
       case 4:
-        return Colors.red[600]!; // Rejected
+        return Colors.red[600]!;
       default:
         return Colors.grey[600]!;
     }
@@ -190,12 +197,12 @@ Future<void> _loadUserIdAndFetch() async {
   Widget _buildInspectionCard(dynamic inspection) {
     final inspectedDate = inspection['inspected_on'] ?? '';
     final formattedInspectedDate = inspectedDate.isNotEmpty 
-        ? DateTime.parse(inspectedDate).toString().split(' ')[0] 
+        ? inspectedDate.split('T')[0]
         : 'N/A';
     
     final markedDate = inspection['marked_on'] ?? '';
     final formattedMarkedDate = markedDate.isNotEmpty 
-        ? DateTime.parse(markedDate).toString().split(' ')[0] 
+        ? markedDate.split('T')[0]
         : 'N/A';
 
     final statusFlag = inspection['status_flag'] ?? 0;
@@ -209,7 +216,7 @@ Future<void> _loadUserIdAndFetch() async {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header row with inspection number and status
+            // Header row
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -223,7 +230,6 @@ Future<void> _loadUserIdAndFetch() async {
                     ),
                   ),
                 ),
-                // Status indicator with fixed height (prevents 1px jiggle)
                 Container(
                   height: 28,
                   constraints: const BoxConstraints(minWidth: 80),
@@ -249,12 +255,12 @@ Future<void> _loadUserIdAndFetch() async {
 
             const SizedBox(height: 12),
 
-            // Inspection Note Number and Marked Info
+            // Inspection Note and Marked Date
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 if (inspection['inspection_note_no'] != null &&
-                    inspection['inspection_note_no'].isNotEmpty)
+                    inspection['inspection_note_no'].toString().isNotEmpty)
                   Expanded(
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -307,7 +313,7 @@ Future<void> _loadUserIdAndFetch() async {
 
             const SizedBox(height: 12),
 
-            // Item Title (Main content) - highlighted
+            // Item Title
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
@@ -347,7 +353,7 @@ Future<void> _loadUserIdAndFetch() async {
                       Icon(Icons.flag, size: 16, color: Colors.orange[600]),
                       const SizedBox(width: 4),
                       Text(
-                        'Target: ${DateTime.parse(inspection['target_date']).toString().split(' ')[0]}',
+                        'Target: ${inspection['target_date'].toString().split('T')[0]}',
                         style: TextStyle(fontSize: 14, color: Colors.orange[700]),
                       ),
                     ],
@@ -385,7 +391,7 @@ Future<void> _loadUserIdAndFetch() async {
                     ],
                   ),
                   if (inspection['officer_desig'] != null &&
-                      inspection['officer_desig'].isNotEmpty)
+                      inspection['officer_desig'].toString().isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Text(
@@ -397,7 +403,7 @@ Future<void> _loadUserIdAndFetch() async {
                       ),
                     ),
                   if (inspection['station_name'] != null &&
-                      inspection['station_name'].isNotEmpty)
+                      inspection['station_name'].toString().isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Row(
@@ -428,10 +434,11 @@ Future<void> _loadUserIdAndFetch() async {
   @override
   Widget build(BuildContext context) {
     final currentStatusName = _getStatusDisplayName(widget.statusIndex);
+    final totalCount = statusCounts['total'] ?? 0;
 
     return Column(
       children: [
-        // Header Section - Compact without search
+        // Header Section
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -481,7 +488,7 @@ Future<void> _loadUserIdAndFetch() async {
                       ),
                     ),
                     Text(
-                      '${filteredInspectionData.length} ${currentStatusName == 'All' ? 'total' : 'of ${allInspectionData.length} total'} items',
+                      '${filteredInspectionData.length} ${currentStatusName == 'All' ? 'total' : 'of $totalCount total'} items',
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.grey[600],
@@ -498,48 +505,50 @@ Future<void> _loadUserIdAndFetch() async {
         Expanded(
           child: RefreshIndicator(
             onRefresh: fetchMarkedToMeInspections,
-            child: filteredInspectionData.isEmpty
-                ? CustomScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    slivers: [
-                      SliverFillRemaining(
-                        hasScrollBody: false,
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.inbox_outlined, size: 64, color: Colors.grey[400]),
-                              const SizedBox(height: 16),
-                              Text(
-                                'No $currentStatusName items marked to you',
-                                style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-                                textAlign: TextAlign.center,
+            child: isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : filteredInspectionData.isEmpty
+                    ? CustomScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        slivers: [
+                          SliverFillRemaining(
+                            hasScrollBody: false,
+                            child: Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.inbox_outlined, size: 64, color: Colors.grey[400]),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    'No $currentStatusName items marked to you',
+                                    style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 20),
+                                  ElevatedButton.icon(
+                                    onPressed: fetchMarkedToMeInspections,
+                                    icon: const Icon(Icons.refresh),
+                                    label: const Text('Refresh'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.blue[700],
+                                      foregroundColor: Colors.white,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 20),
-                              ElevatedButton.icon(
-                                onPressed: fetchMarkedToMeInspections,
-                                icon: const Icon(Icons.refresh),
-                                label: const Text('Refresh'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.blue[700],
-                                  foregroundColor: Colors.white,
-                                ),
-                              ),
-                            ],
+                            ),
                           ),
-                        ),
+                        ],
+                      )
+                    : ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        itemCount: filteredInspectionData.length,
+                        itemBuilder: (context, index) {
+                          final inspection = filteredInspectionData[index];
+                          return _buildInspectionCard(inspection);
+                        },
                       ),
-                    ],
-                  )
-                : ListView.builder(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    itemCount: filteredInspectionData.length,
-                    itemBuilder: (context, index) {
-                      final inspection = filteredInspectionData[index];
-                      return _buildInspectionCard(inspection);
-                    },
-                  ),
           ),
         ),
       ],
@@ -548,17 +557,12 @@ Future<void> _loadUserIdAndFetch() async {
 
   IconData _getStatusIcon(int statusIndex) {
     const statusIcons = [
-      Icons.edit_note,         // Draft
-      Icons.hourglass_empty,   // Pending
-      Icons.work_history,      // Partially Completed
-      Icons.check_circle,      // Complied
-      Icons.cancel,            // Rejected
+      Icons.edit_note,
+      Icons.hourglass_empty,
+      Icons.work_history,
+      Icons.check_circle,
+      Icons.cancel,
     ];
     return statusIcons[statusIndex];
-  }
-
-  @override
-  void dispose() {
-    super.dispose();
   }
 }

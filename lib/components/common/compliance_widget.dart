@@ -1,6 +1,3 @@
-
-
-
 // lib/components/common/compliance_widget.dart
 import 'package:flutter/material.dart';
 

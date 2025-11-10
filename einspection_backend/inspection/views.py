@@ -1,5 +1,3 @@
-
-
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
@@ -375,28 +373,130 @@ def get_status_counts(user_id):
 
 
 
+# @api_view(['GET'])
+# def get_marked_to_me_inspections(request):
+#     try:
+#         # ✅ Step 1: Validate user_id
+#         user_id = request.GET.get('user_id')
+#         if not user_id:
+#             return Response({'success': False, 'message': 'user_id is required'}, status=400)
+
+#         # ✅ Step 2: Get logged-in user
+#         try:
+#             user = MyUser.objects.get(id=user_id)
+#         except MyUser.DoesNotExist:
+#             return Response({'success': False, 'message': 'User not found'}, status=404)
+
+#         # ✅ Step 3: Use user.id (not user_role text) to match marked_to_id
+#         marked_records = InspectMarkedOfficer.objects.filter(marked_to_id=user.id)
+#         if not marked_records.exists():
+#             return Response({'success': True, 'total_count': 0, 'inspections': []}, status=200)
+
+#         inspections_data = []
+
+#         # ✅ Step 4: Loop through records and fetch all info
+#         for mo in marked_records:
+#             try:
+#                 item = InspectItemDetails.objects.get(item_no=mo.item_no_id)
+#                 inspection = InspectionDetails.objects.get(inspection_no=item.inspection_no_id)
+#             except (InspectItemDetails.DoesNotExist, InspectionDetails.DoesNotExist):
+#                 continue  # Skip broken references
+
+#             inspections_data.append({
+#                 # 🔹 Inspection details
+#                 'inspection_no': inspection.inspection_no,
+#                 'inspection_note_no': inspection.inspection_note_no,
+#                 'inspection_title': inspection.inspection_title,
+#                 'created_on': inspection.created_on,
+#                 'modified_on': inspection.modified_on,
+#                 'created_by': inspection.created_by,
+#                 'modified_by': inspection.modified_by,
+#                 'inspection_officer_id': inspection.inspection_officer_id,
+#                 'officer_name': inspection.officer_name,
+#                 'officer_desig': inspection.officer_desig,
+#                 'station_name': inspection.station_name,
+#                 'target_date': inspection.target_date,
+#                 'status_flag': inspection.status_flag,
+#                 'status': inspection.status,
+#                 'final_submit_on': inspection.final_submit_on,
+#                 'inspected_on': inspection.inspected_on,
+
+#                 # 🔹 Item details
+#                 'item_no': item.item_no,
+#                 'item_title': item.item_title,
+#                 'item_status': item.status,
+
+#                 # 🔹 Marked officer details
+#                 'marked_no': mo.marked_no,
+#                 'marked_to_id': mo.marked_to_id,
+#                 'marked_on': mo.marked_on,
+#             })
+
+#         # ✅ Step 5: Group by status_category if filter provided
+#         status_category = request.GET.get('status_category', 'all').lower()
+#         category_map = {
+#             'draft': 0,
+#             'pending': 1,
+#             'partially_completed': 2,
+#             'complied': 3,
+#             'rejected': 4,
+#         }
+
+#         if status_category in category_map:
+#             inspections_data = [i for i in inspections_data if i['status_flag'] == category_map[status_category]]
+
+#         return Response({
+#             'success': True,
+#             'total_count': len(inspections_data),
+#             'status_category': status_category,
+#             'inspections': inspections_data
+#         }, status=200)
+
+#     except Exception as e:
+#         return Response({'success': False, 'message': f'Server error: {str(e)}'}, status=500)
+
+
+
+
+
 @api_view(['GET'])
 def get_marked_to_me_inspections(request):
+    """
+    Get inspections marked to the logged-in user with proper status filtering
+    """
     try:
-        # ✅ Step 1: Validate user_id
+        # Step 1: Validate user_id
         user_id = request.GET.get('user_id')
         if not user_id:
-            return Response({'success': False, 'message': 'user_id is required'}, status=400)
+            return Response({
+                'success': False, 
+                'message': 'user_id is required'
+            }, status=400)
 
-        # ✅ Step 2: Get logged-in user
+        # Step 2: Get logged-in user
         try:
             user = MyUser.objects.get(id=user_id)
         except MyUser.DoesNotExist:
-            return Response({'success': False, 'message': 'User not found'}, status=404)
+            return Response({
+                'success': False, 
+                'message': 'User not found'
+            }, status=404)
 
-        # ✅ Step 3: Use user.id (not user_role text) to match marked_to_id
+        # Step 3: Get all marked records for this user
         marked_records = InspectMarkedOfficer.objects.filter(marked_to_id=user.id)
+        
         if not marked_records.exists():
-            return Response({'success': True, 'total_count': 0, 'inspections': []}, status=200)
+            return Response({
+                'success': True,
+                'total_count': 0,
+                'filtered_count': 0,
+                'status_flag_filter': None,
+                'inspections': []
+            }, status=200)
 
+        # Step 4: Collect all inspection data
         inspections_data = []
-
-        # ✅ Step 4: Loop through records and fetch all info
+        
         for mo in marked_records:
             try:
                 item = InspectItemDetails.objects.get(item_no=mo.item_no_id)
@@ -405,56 +505,71 @@ def get_marked_to_me_inspections(request):
                 continue  # Skip broken references
 
             inspections_data.append({
-                # 🔹 Inspection details
+                # Inspection details
                 'inspection_no': inspection.inspection_no,
                 'inspection_note_no': inspection.inspection_note_no,
                 'inspection_title': inspection.inspection_title,
-                'created_on': inspection.created_on,
-                'modified_on': inspection.modified_on,
+                'created_on': inspection.created_on.isoformat() if inspection.created_on else None,
+                'modified_on': inspection.modified_on.isoformat() if inspection.modified_on else None,
                 'created_by': inspection.created_by,
                 'modified_by': inspection.modified_by,
                 'inspection_officer_id': inspection.inspection_officer_id,
                 'officer_name': inspection.officer_name,
                 'officer_desig': inspection.officer_desig,
                 'station_name': inspection.station_name,
-                'target_date': inspection.target_date,
+                'target_date': inspection.target_date.isoformat() if inspection.target_date else None,
                 'status_flag': inspection.status_flag,
                 'status': inspection.status,
-                'final_submit_on': inspection.final_submit_on,
-                'inspected_on': inspection.inspected_on,
+                'final_submit_on': inspection.final_submit_on.isoformat() if inspection.final_submit_on else None,
+                'inspected_on': inspection.inspected_on.isoformat() if inspection.inspected_on else None,
 
-                # 🔹 Item details
+                # Item details
                 'item_no': item.item_no,
                 'item_title': item.item_title,
                 'item_status': item.status,
 
-                # 🔹 Marked officer details
+                # Marked officer details
                 'marked_no': mo.marked_no,
                 'marked_to_id': mo.marked_to_id,
-                'marked_on': mo.marked_on,
+                'marked_on': mo.marked_on.isoformat() if mo.marked_on else None,
             })
 
-        # ✅ Step 5: Group by status_category if filter provided
-        status_category = request.GET.get('status_category', 'all').lower()
-        category_map = {
-            'draft': 0,
-            'pending': 1,
-            'partially_completed': 2,
-            'complied': 3,
-            'rejected': 4,
+        # Step 5: Calculate status counts BEFORE filtering
+        status_counts = {
+            'draft': len([i for i in inspections_data if i['status_flag'] == 0]),
+            'pending': len([i for i in inspections_data if i['status_flag'] == 1]),
+            'partially_completed': len([i for i in inspections_data if i['status_flag'] == 2]),
+            'complied': len([i for i in inspections_data if i['status_flag'] == 3]),
+            'rejected': len([i for i in inspections_data if i['status_flag'] == 4]),
+            'total': len(inspections_data)
         }
 
-        if status_category in category_map:
-            inspections_data = [i for i in inspections_data if i['status_flag'] == category_map[status_category]]
+        # Step 6: Apply status_flag filter if provided
+        status_flag_param = request.GET.get('status_flag')
+        filtered_data = inspections_data
+        
+        if status_flag_param is not None:
+            try:
+                status_flag_value = int(status_flag_param)
+                filtered_data = [i for i in inspections_data if i['status_flag'] == status_flag_value]
+            except ValueError:
+                return Response({
+                    'success': False, 
+                    'message': 'status_flag must be a valid integer (0-4)'
+                }, status=400)
 
+        # Step 7: Return response
         return Response({
             'success': True,
             'total_count': len(inspections_data),
-            'status_category': status_category,
-            'inspections': inspections_data
+            'filtered_count': len(filtered_data),
+            'status_flag_filter': status_flag_param,
+            'status_counts': status_counts,
+            'inspections': filtered_data
         }, status=200)
 
     except Exception as e:
-        return Response({'success': False, 'message': f'Server error: {str(e)}'}, status=500)
-
-   
+        return Response({
+            'success': False, 
+            'message': f'Server error: {str(e)}'
+        }, status=500)
