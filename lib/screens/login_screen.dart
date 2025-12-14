@@ -38,7 +38,7 @@ class _LoginScreenState extends State<LoginScreen>
   // IOClient ioClient = IOClient(httpClient);
 
   // API endpoint
-  static const String _apiUrl = 'http://localhost:8000/api/login/';
+  static const String _apiUrl = 'http://192.168.56.1/api/login/';
 
   @override
   void initState() {
